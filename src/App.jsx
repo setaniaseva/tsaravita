@@ -229,12 +229,11 @@ function Arrow({ x1, y1, x2, y2, color, label, r = 24, offset = 0, pathEdge = fa
 }
 
 // ─── GraphSVG avec clic sur noeuds ──────────────────────────────────────
-function GraphSVG({ nodes, edges, pos, flow, result, highlightPath, sourceNode, sinkNode, showFlow, onNodeClick, selectedNode, onEdgeClick }) {
+function GraphSVG({ nodes, edges, pos, flow, result, highlightPath, sourceNode, sinkNode, showFlow, onNodeClick, selectedNode, onEdgeClick, showSaturatedOnly }) {
   const pathSet = new Set((highlightPath || []).map(([u, v]) => `${u}-${v}`));
   const idxMap = result?.idxMap || {};
   const edgeSet = new Set(edges.map(([u, v]) => `${u}-${v}`));
   
-  // Trouver tous les chemins passant par le nœud sélectionné
   const getPathsThroughNode = (node) => {
     if (!result || !node || !selectedNode) return new Set();
     const paths = new Set();
@@ -249,6 +248,15 @@ function GraphSVG({ nodes, edges, pos, flow, result, highlightPath, sourceNode, 
 
   const highlightedPaths = getPathsThroughNode(selectedNode);
   
+  const filteredEdges = showSaturatedOnly && result && flow
+    ? edges.filter(([ul, vl, cap]) => {
+        const ui = idxMap[ul], vi = idxMap[vl];
+        if (ui === undefined || vi === undefined) return false;
+        const f = flow[ui][vi] || 0;
+        return f === cap && cap > 0;
+      })
+    : edges;
+  
   return (
     <svg viewBox="0 0 880 505" className="w-full rounded-2xl" style={{ background: "transparent" }}>
       <defs>
@@ -259,14 +267,22 @@ function GraphSVG({ nodes, edges, pos, flow, result, highlightPath, sourceNode, 
       </defs>
       <rect x="0" y="0" width="880" height="505" rx="16" fill="url(#bgGrad)" stroke="#d1d9e6" strokeWidth="1" />
       
-      {edges.map(([ul, vl, cap], i) => {
+      {showSaturatedOnly && (
+        <>
+          <rect x="10" y="10" width="200" height="30" rx="6" fill={C.arcFull} fillOpacity="0.9" />
+          <text x="110" y="29" fill="#fff" fontSize="12" fontWeight="bold" textAnchor="middle">
+            🔴 Arcs saturés uniquement
+          </text>
+        </>
+      )}
+      
+      {filteredEdges.map(([ul, vl, cap], i) => {
         const ui = idxMap[ul], vi = idxMap[vl];
         const f = (flow && ui !== undefined && vi !== undefined) ? flow[ui][vi] : 0;
         const onPath = pathSet.has(`${ui}-${vi}`);
         const hasBidi = edgeSet.has(`${vl}-${ul}`);
         const off = hasBidi ? 8 : 0;
         
-        // Vérifier si l'arc est dans un chemin passant par le nœud sélectionné
         const isHighlighted = selectedNode && result && 
           highlightedPaths.size > 0 && 
           result.steps.some((step, idx) => 
@@ -325,7 +341,6 @@ function NodeDetailsPanel({ node, result, nodes, edges, sourceNode, sinkNode, on
   const nodeIdx = idxMap[node];
   if (nodeIdx === undefined) return null;
 
-  // Trouver tous les chemins qui passent par ce nœud
   const pathsThroughNode = [];
   let totalFlowThroughNode = 0;
 
@@ -342,7 +357,6 @@ function NodeDetailsPanel({ node, result, nodes, edges, sourceNode, sinkNode, on
     }
   });
 
-  // Statistiques des arcs entrants et sortants
   const incomingEdges = edges.filter(([, v]) => v === node);
   const outgoingEdges = edges.filter(([u]) => u === node);
   
@@ -422,7 +436,6 @@ function NodeDetailsPanel({ node, result, nodes, edges, sourceNode, sinkNode, on
         </div>
       )}
 
-      {/* Liste des arcs incidents */}
       <div className="mb-4">
         <div className="font-bold text-sm mb-2" style={{color: C.accent}}>
           Arcs incidents
@@ -431,20 +444,22 @@ function NodeDetailsPanel({ node, result, nodes, edges, sourceNode, sinkNode, on
           {incomingEdges.map(([u, v, cap], i) => {
             const ui = idxMap[u], vi = idxMap[v];
             const f = (ui !== undefined && vi !== undefined) ? result.flow[ui][vi] : 0;
+            const isSaturated = f === cap && cap > 0;
             return (
-              <div key={`in-${i}`} className="p-2 rounded-lg text-xs flex justify-between" style={{background: C.bg}}>
+              <div key={`in-${i}`} className="p-2 rounded-lg text-xs flex justify-between" style={{background: isSaturated ? C.tblRed : C.bg}}>
                 <span><span style={{color: C.arcRed}}>{u}</span> → <span style={{color: C.arcBlue}}>{v}</span></span>
-                <span style={{color: C.muted}}>{cap} → {f} ({f === cap ? 'saturé' : f > 0 ? 'partiel' : 'inactif'})</span>
+                <span style={{color: isSaturated ? C.arcFull : C.muted}}>{cap} → {f} ({f === cap ? '🔴 saturé' : f > 0 ? '🟢 partiel' : '⚪ inactif'})</span>
               </div>
             );
           })}
           {outgoingEdges.map(([u, v, cap], i) => {
             const ui = idxMap[u], vi = idxMap[v];
             const f = (ui !== undefined && vi !== undefined) ? result.flow[ui][vi] : 0;
+            const isSaturated = f === cap && cap > 0;
             return (
-              <div key={`out-${i}`} className="p-2 rounded-lg text-xs flex justify-between" style={{background: C.bg}}>
+              <div key={`out-${i}`} className="p-2 rounded-lg text-xs flex justify-between" style={{background: isSaturated ? C.tblRed : C.bg}}>
                 <span><span style={{color: C.arcRed}}>{u}</span> → <span style={{color: C.arcBlue}}>{v}</span></span>
-                <span style={{color: C.muted}}>{cap} → {f} ({f === cap ? 'saturé' : f > 0 ? 'partiel' : 'inactif'})</span>
+                <span style={{color: isSaturated ? C.arcFull : C.muted}}>{cap} → {f} ({f === cap ? '🔴 saturé' : f > 0 ? '🟢 partiel' : '⚪ inactif'})</span>
               </div>
             );
           })}
@@ -776,13 +791,13 @@ export default function MaxFlowApp() {
   const [running, setRunning]         = useState(false);
   const [speed, setSpeed]             = useState(900);
   const [showFlow, setShowFlow]       = useState(false);
+  const [showSaturatedOnly, setShowSaturatedOnly] = useState(false);
   const timerRef = useRef(null);
 
   const [apiOk, setApiOk]       = useState(false);
   const [apiLoading, setApiLoading] = useState(false);
   const [showSave, setShowSave] = useState(false);
 
-  // État pour le nœud sélectionné
   const [selectedNode, setSelectedNode] = useState(null);
 
   const flowComplete = result && showFlow
@@ -792,7 +807,6 @@ export default function MaxFlowApp() {
     ? computeMinCut(result.flow, edges, result.idxMap, sourceNode, sinkNode, nodes)
     : null;
 
-  // ── Vérification du backend ──
   useEffect(() => {
     fetch(`${API}/health`)
       .then(r=>r.json())
@@ -805,7 +819,6 @@ export default function MaxFlowApp() {
     setTimeout(()=>setToast(null), 2800);
   }
 
-  // ── Charger un graphe depuis le backend ──────────────────────────────────
   async function loadGraph(id) {
     setApiLoading(true);
     try {
@@ -823,6 +836,7 @@ export default function MaxFlowApp() {
       setGraphName(g.name);
       setResult(null); setCurrentStep(-1); setShowFlow(false);
       setSelectedNode(null);
+      setShowSaturatedOnly(false);
 
       if (g.last_result) {
         const res = g.last_result;
@@ -855,7 +869,6 @@ export default function MaxFlowApp() {
     }
   }
 
-  // ── Sauvegarder le graphe en cours ──────────────────────────────────────
   async function saveGraph(name) {
     setShowSave(false);
     if (!apiOk) return toast_("Backend non disponible", "err");
@@ -879,7 +892,6 @@ export default function MaxFlowApp() {
     }
   }
 
-  // ── Charger graphe par défaut depuis backend ──────────────────────────────
   async function loadDefault() {
     if (!apiOk) {
       setNodes([...DEFAULT_NODES]); setEdges(DEFAULT_EDGES.map(e=>[...e]));
@@ -887,6 +899,7 @@ export default function MaxFlowApp() {
       setResult(null); setCurrentStep(-1); setShowFlow(false);
       setCurrentGraphId(null);
       setSelectedNode(null);
+      setShowSaturatedOnly(false);
       toast_("Données réinitialisées (hors ligne)");
       return;
     }
@@ -903,7 +916,6 @@ export default function MaxFlowApp() {
     }
   }
 
-  // ── Gestionnaire de clic sur nœud ──────────────────────────────────────
   const handleNodeClick = (node) => {
     if (selectedNode === node) {
       setSelectedNode(null);
@@ -912,7 +924,19 @@ export default function MaxFlowApp() {
     }
   };
 
-  // ── Nœuds ────────────────────────────────────────────────────────────────
+  const getSaturatedCount = () => {
+    if (!result || !result.flow) return 0;
+    let count = 0;
+    edges.forEach(([u, v, cap]) => {
+      const ui = result.idxMap[u], vi = result.idxMap[v];
+      if (ui !== undefined && vi !== undefined) {
+        const f = result.flow[ui][vi] || 0;
+        if (f === cap && cap > 0) count++;
+      }
+    });
+    return count;
+  };
+
   async function addNode() {
     const n = newNode.trim().toUpperCase();
     if (!n) return setErrors({node:"Nom requis"});
@@ -952,7 +976,6 @@ export default function MaxFlowApp() {
     toast_(`"${n}" supprimé`, "warn");
   }
 
-  // ── Arcs ─────────────────────────────────────────────────────────────────
   async function addEdge() {
     const {from,to,cap} = newEdge;
     const errs = {};
@@ -994,29 +1017,49 @@ export default function MaxFlowApp() {
     toast_("Arc supprimé","warn");
   }
 
-  function startEdit(i) { setEditEdge(i); setEditCap(String(edges[i][2])); }
+  function startEdit(i) { 
+    setEditEdge(i); 
+    setEditCap(String(edges[i][2])); 
+  }
 
   async function saveEdit() {
     const c = parseInt(editCap);
-    if (isNaN(c)||c<=0) return setErrors({editCap:"Capacité > 0"});
+    if (isNaN(c)||c<=0) {
+      setErrors({editCap:"Capacité > 0"});
+      return;
+    }
 
+    // Mise à jour locale
+    const newEdges = edges.map((e, idx) => {
+      if (idx === editEdge) {
+        return [e[0], e[1], c];
+      }
+      return e;
+    });
+    setEdges(newEdges);
+    setEditEdge(null);
+    setErrors({});
+    setResult(null);
+    
+    // Mise à jour du backend si disponible
     if (apiOk && currentGraphId && edgeIds[editEdge]) {
       try {
         await fetch(`${API}/graphs/${currentGraphId}/edges/${edgeIds[editEdge]}`, {
-          method:"PUT", headers:{"Content-Type":"application/json"},
+          method:"PUT", 
+          headers:{"Content-Type":"application/json"},
           body: JSON.stringify({capacity:c})
         });
-      } catch {}
+      } catch(e) {
+        console.error("Erreur mise à jour backend:", e);
+      }
     }
-    setEdges(edges.map((e,i)=>i===editEdge?[e[0],e[1],c]:e));
-    setEditEdge(null); setErrors({}); setResult(null);
     toast_("Capacité mise à jour");
   }
 
-  // ── Calcul (backend prioritaire, fallback local) ──────────────────────────
   async function solve() {
     clearInterval(timerRef.current); setRunning(false);
     setSelectedNode(null);
+    setShowSaturatedOnly(false);
 
     if (apiOk && currentGraphId) {
       setApiLoading(true);
@@ -1049,12 +1092,14 @@ export default function MaxFlowApp() {
     clearInterval(timerRef.current);
     setResult(null); setCurrentStep(-1); setRunning(false); setShowFlow(false);
     setSelectedNode(null);
+    setShowSaturatedOnly(false);
   }
 
   function playAnim() {
     if (!result) return;
     setShowFlow(false); setCurrentStep(0); setRunning(true);
     setSelectedNode(null);
+    setShowSaturatedOnly(false);
   }
 
   useEffect(() => {
@@ -1100,7 +1145,10 @@ export default function MaxFlowApp() {
     setNodePos({}); setCurrentGraphId(null); setGraphName("");
     setResult(null); setCurrentStep(-1); setShowFlow(false);
     setSelectedNode(null);
+    setShowSaturatedOnly(false);
   }
+
+  const saturatedCount = getSaturatedCount();
 
   return (
     <div className="min-h-screen p-4 md:p-6" style={{background:C.bg,color:C.text,fontFamily:"'Inter',sans-serif"}}>
@@ -1200,6 +1248,19 @@ export default function MaxFlowApp() {
               </span>
             </div>
 
+            {/* Bouton pour afficher les arcs saturés */}
+            {result && (
+              <div className="flex justify-center mb-4">
+                <Btn 
+                  onClick={() => setShowSaturatedOnly(!showSaturatedOnly)} 
+                  color={showSaturatedOnly ? C.arcFull : C.accentDim}
+                  textColor={showSaturatedOnly ? "#fff" : C.accent}
+                >
+                  {showSaturatedOnly ? "🔴 Masquer les arcs saturés" : `🔴 Afficher les arcs saturés (${saturatedCount})`}
+                </Btn>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <div className="lg:col-span-2 rounded-2xl p-3 border" style={{borderColor:C.border,background:C.panel}}>
                 <GraphSVG 
@@ -1214,9 +1275,13 @@ export default function MaxFlowApp() {
                   showFlow={showFlow||(running&&currentStep>=0)}
                   onNodeClick={handleNodeClick}
                   selectedNode={selectedNode}
+                  showSaturatedOnly={showSaturatedOnly}
                 />
                 <div className="text-xs text-center mt-2" style={{color:C.muted}}>
                   💡 Cliquez sur un <strong style={{color:C.purple}}>nœud</strong> pour voir tous les résultats détaillés
+                  {result && (
+                    <span className="ml-2">· <span style={{color:C.arcFull}}>🔴 {saturatedCount}</span> arcs saturés</span>
+                  )}
                 </div>
               </div>
               <div className="lg:col-span-1">
@@ -1280,6 +1345,10 @@ export default function MaxFlowApp() {
                       <div className="text-3xl font-black" style={{color:C.orange}}>{edges.length}</div>
                       <div className="text-xs" style={{color:C.muted}}>arcs</div>
                     </div>
+                    <div>
+                      <div className="text-3xl font-black" style={{color:C.arcFull}}>{saturatedCount}</div>
+                      <div className="text-xs" style={{color:C.muted}}>saturés</div>
+                    </div>
                   </div>
                 </div>
 
@@ -1296,6 +1365,11 @@ export default function MaxFlowApp() {
                         {selectedNode} sélectionné
                       </span>
                     )}
+                    {showSaturatedOnly && (
+                      <span className="text-xs px-2 py-1 rounded-full" style={{background:C.arcFull,color:"#fff"}}>
+                        🔴 Filtre saturés
+                      </span>
+                    )}
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
@@ -1309,7 +1383,6 @@ export default function MaxFlowApp() {
                       <tbody>
                         {result.steps.map((s,i)=>{
                           const active=i===currentStep,past=i<currentStep;
-                          // Vérifier si le chemin passe par le nœud sélectionné
                           const passesThroughSelected = selectedNode && 
                             s.path.includes(selectedNode);
                           return (
@@ -1341,13 +1414,18 @@ export default function MaxFlowApp() {
                       🟣 Les lignes violettes contiennent le nœud <strong>{selectedNode}</strong>
                     </div>
                   )}
+                  {showSaturatedOnly && (
+                    <div className="px-4 py-2 text-xs" style={{background:C.arcFull,color:"#fff"}}>
+                      🔴 Affichage des arcs saturés uniquement ({saturatedCount} arcs)
+                    </div>
+                  )}
                 </div>
               </>
             )}
 
             {!result && (
               <div className="text-center py-14 rounded-2xl border mt-5" style={{borderColor:C.border,background:C.panel}}>
-                <div className="text-5xl mb-3">🌊</div>
+                
                 <p className="font-semibold mb-1">{nodes.length} noeuds · {edges.length} arcs</p>
                 <p className="text-sm" style={{color:C.muted}}>
                   Source : <strong style={{color:C.accent}}>{sourceNode||"—"}</strong> · Puits : <strong style={{color:C.green}}>{sinkNode||"—"}</strong>
@@ -1448,52 +1526,90 @@ export default function MaxFlowApp() {
               </div>
             </div>
             <div className="rounded-2xl border overflow-hidden" style={{background:C.panel,borderColor:C.border}}>
-              <div className="px-5 py-3" style={{borderBottom:`1px solid ${C.border}`}}>
-                <span className="font-bold text-sm">Arcs</span>
-                <span className="ml-2 text-xs" style={{color:C.muted}}>({edges.length})</span>
+              <div className="px-5 py-3 flex items-center justify-between" style={{borderBottom:`1px solid ${C.border}`}}>
+                <div>
+                  <span className="font-bold text-sm">Arcs</span>
+                  <span className="ml-2 text-xs" style={{color:C.muted}}>({edges.length})</span>
+                  {result && (
+                    <span className="ml-2 text-xs" style={{color:C.arcFull}}>🔴 {saturatedCount} saturés</span>
+                  )}
+                </div>
+                {editEdge !== null && (
+                  <span className="text-xs" style={{color:C.accent}}>✏️ Modification en cours</span>
+                )}
               </div>
               <div className="overflow-y-auto" style={{maxHeight:400}}>
                 <table className="w-full text-sm">
                   <thead>
                     <tr style={{background:C.bg}}>
-                      {["De","Vers","Cap","Actions"].map(h=>(
+                      {["De","Vers","Cap","Flot","Statut","Actions"].map(h=>(
                         <th key={h} className="px-3 py-2 text-left text-xs font-bold" style={{color:C.muted}}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {edges.map(([u,v,c],i)=>(
-                      <tr key={i} style={{borderBottom:`1px solid ${C.border}`}}>
-                        <td className="px-3 py-2 font-mono font-bold" style={{color:C.arcRed}}>{u}</td>
-                        <td className="px-3 py-2 font-mono font-bold" style={{color:C.arcBlue}}>{v}</td>
-                        <td className="px-3 py-2">
-                          {editEdge===i
-                            ? <div className="flex gap-1 items-center">
-                                <input type="number" value={editCap} onChange={e=>setEditCap(e.target.value)}
-                                  className="rounded px-2 py-1 w-16 text-xs"
-                                  style={{background:C.bg,border:`1px solid ${C.accent}`,color:C.text}} />
-                                {errors.editCap && <span className="text-xs" style={{color:C.red}}>{errors.editCap}</span>}
+                    {edges.map(([u,v,c],i)=>{
+                      const ui = result?.idxMap?.[u], vi = result?.idxMap?.[v];
+                      const f = (ui !== undefined && vi !== undefined && result?.flow) ? result.flow[ui][vi] : 0;
+                      const isSaturated = f === c && c > 0;
+                      const isPartial = f > 0 && !isSaturated;
+                      const isEditing = editEdge === i;
+                      return (
+                        <tr key={i} style={{borderBottom:`1px solid ${C.border}`, background: isEditing ? C.accentDim : (isSaturated ? C.tblRed : (isPartial ? C.tblOrange : "transparent"))}}>
+                          <td className="px-3 py-2 font-mono font-bold" style={{color:C.arcRed}}>{u}</td>
+                          <td className="px-3 py-2 font-mono font-bold" style={{color:C.arcBlue}}>{v}</td>
+                          <td className="px-3 py-2">
+                            {isEditing ? (
+                              <div className="flex gap-1 items-center">
+                                <input 
+                                  type="number" 
+                                  value={editCap} 
+                                  onChange={e => setEditCap(e.target.value)}
+                                  className="rounded px-2 py-1 w-16 text-xs font-bold"
+                                  style={{background:C.bg, border: `2px solid ${C.accent}`, color: C.text}}
+                                  autoFocus
+                                />
                               </div>
-                            : <span className="font-bold">{c}</span>}
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="flex gap-1">
-                            {editEdge===i
-                              ? <>
+                            ) : (
+                              <span className="font-bold">{c}</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 font-mono" style={{color: isSaturated ? C.arcFull : (isPartial ? C.flowHighlight : C.muted)}}>
+                            {result ? f : "-"}
+                          </td>
+                          <td className="px-3 py-2">
+                            {result && (
+                              <span className={`text-xs px-2 py-1 rounded-full font-bold ${isSaturated ? 'bg-red-100 text-red-700' : isPartial ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                                {isSaturated ? "🔴 Saturé" : isPartial ? "🟢 Partiel" : "⚪ Inactif"}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex gap-1">
+                              {isEditing ? (
+                                <>
                                   <Btn onClick={saveEdit} sm color={C.green} textColor="#fff">✓</Btn>
                                   <Btn onClick={()=>{setEditEdge(null);setErrors({});}} sm color={C.border} textColor={C.text}>✕</Btn>
                                 </>
-                              : <>
+                              ) : (
+                                <>
                                   <Btn onClick={()=>startEdit(i)} sm color={C.accentDim} textColor={C.accent}>✎</Btn>
                                   <Btn onClick={()=>removeEdge(i)} sm color="#fef2f2" textColor={C.red}>✕</Btn>
-                                </>}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
+              {errors.editCap && (
+                <div className="px-4 py-2 text-xs text-red-600" style={{background:C.tblRed}}>
+                  ⚠️ {errors.editCap}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1507,6 +1623,7 @@ export default function MaxFlowApp() {
                 if (src===snk) return toast_("Source ≠ Puits","err");
                 setSourceNode(src); setSinkNode(snk); setResult(null);
                 setSelectedNode(null);
+                setShowSaturatedOnly(false);
                 if (apiOk && currentGraphId) {
                   fetch(`${API}/graphs/${currentGraphId}`, {
                     method:"PUT", headers:{"Content-Type":"application/json"},
@@ -1524,6 +1641,7 @@ export default function MaxFlowApp() {
                 {l:"Puits (ω)",v:sinkNode||"—",c:C.green},
                 {l:"Graphe ID",v:currentGraphId||"(non sauvegarde)",c:C.orange},
                 {l:"Cap. totale depuis source",v:edges.filter(([u])=>u===sourceNode).reduce((s,[,,c])=>s+c,0),c:C.text},
+                {l:"Arcs saturés",v:saturatedCount,c:C.arcFull},
               ].map(({l,v,c})=>(
                 <div key={l} className="flex justify-between items-center py-2.5" style={{borderBottom:`1px solid ${C.border}`}}>
                   <span className="text-sm" style={{color:C.muted}}>{l}</span>
